@@ -1,0 +1,28 @@
+
+# Virtual environment
+env/
+
+# Environment variables
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Saved models
+ml_model/model/*.pkl
+
+# Vector store (regenerate from documents)
+rag/vectorstore/
+
+# Large data files
+data/raw/
+data/processed/*.csv
+
+# OS files
+.DS_Store
+Thumbs.db
