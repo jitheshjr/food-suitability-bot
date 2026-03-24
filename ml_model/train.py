@@ -92,7 +92,7 @@ plt.xlabel("Predicted")
 plt.ylabel("Actual")
 plt.title("Confusion Matrix")
 plt.tight_layout()
-plt.savefig("model/confusion_matrix.png")
+plt.savefig("model/diagrams/confusion_matrix.png")
 print("\nConfusion matrix saved to model/confusion_matrix.png")
 
 # ── 9. Feature importance plot ────────────────────
@@ -107,7 +107,7 @@ feat_df.plot(kind='barh', x='feature', y='importance',
 plt.title("Feature importances")
 plt.xlabel("Importance score")
 plt.tight_layout()
-plt.savefig("model/feature_importance.png")
+plt.savefig("model/diagrams/feature_importance.png")
 print("Feature importance plot saved to model/feature_importance.png")
 
 # ── 10. Cross-validation ──────────────────────────

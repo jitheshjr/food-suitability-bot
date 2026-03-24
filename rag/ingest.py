@@ -1,15 +1,14 @@
 import os
 import sys
-
-# Resolve paths relative to this file
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DOCS_DIR = os.path.join(BASE_DIR, "..", "data", "rag_documents")
-STORE_DIR = os.path.join(BASE_DIR, "vectorstore")
-
 from langchain_community.document_loaders import TextLoader, PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DOCS_DIR = os.path.join(BASE_DIR, "..", "data", "rag_documents")
+STORE_DIR = os.path.join(BASE_DIR, "vectorstore")
+
 
 def load_all_documents(docs_dir):
     all_docs = []

@@ -2,6 +2,8 @@ import os
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_community.vectorstores import Chroma
 
+os.environ["ANONYMIZED_TELEMETRY"] = "False"
+
 BASE_DIR  = os.path.dirname(os.path.abspath(__file__))
 STORE_DIR = os.path.join(BASE_DIR, "vectorstore")
 

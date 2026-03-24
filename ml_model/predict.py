@@ -81,7 +81,7 @@ def predict_suitability(patient: dict, food: dict):
 
     return label, confidence, top_reasons
 
-
+# For testing through COMMAND LINE
 if __name__ == "__main__":
     # Quick test
     patient = {'age': 64, 'condition': 'diabetes'}

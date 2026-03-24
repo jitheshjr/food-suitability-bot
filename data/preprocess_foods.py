@@ -1,6 +1,6 @@
 import pandas as pd
 
-print("Loading USDA data...")
+print("----Loading USDA data----")
 food = pd.read_csv("raw/food.csv")
 food_nutrient = pd.read_csv("raw/food_nutrient.csv")
 nutrient = pd.read_csv("raw/nutrient.csv")
@@ -16,8 +16,11 @@ NUTRIENT_MAP = {
     1093: 'sodium_mg',
 }
 
-print("Filtering nutrients...")
-filtered = food_nutrient[food_nutrient['nutrient_id'].isin(NUTRIENT_MAP.keys())].copy()
+print("----Filtering nutrients----")
+# Copying Selected Nutrients from food_nutrient
+filtered = food_nutrient[food_nutrient['nutrient_id'].isin(NUTRIENT_MAP.keys())].copy() 
+
+# Mapping NUTRIENT_MAP to filtered 
 filtered['nutrient_name'] = filtered['nutrient_id'].map(NUTRIENT_MAP)
 
 # Pivot so each food is one row with nutrient columns

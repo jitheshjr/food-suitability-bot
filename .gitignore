@@ -21,7 +21,6 @@ rag/vectorstore/
 
 # Large data files
 data/raw/
-data/processed/*.csv
 
 # OS files
 .DS_Store
