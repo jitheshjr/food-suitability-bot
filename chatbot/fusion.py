@@ -8,8 +8,9 @@ def build_prompt(entities: dict, food_nutrition: dict,
     sugar     = food_nutrition.get('sugar_g', '?')
     sodium    = food_nutrition.get('sodium_mg', '?')
     gi        = food_nutrition.get('gi_value', '?')
+    found     = food_nutrition.get('found', True)
 
-    # Pick one guideline sentence
+    # Guideline hint from RAG
     guideline_hint = ""
     if rag_results:
         first_sentence = rag_results[0]['text'].split('.')[0].strip()
@@ -21,26 +22,44 @@ def build_prompt(entities: dict, food_nutrition: dict,
     if shap_reasons:
         top_feat, top_val = shap_reasons[0]
         if top_val > 0:
-            top_reason = f"especially its {top_feat}"
+            top_reason = f"particularly its {top_feat}"
+
+    # Nutrition note
+    if found:
+        nutrition_note = (
+            f"It contains {sugar}g of sugar, {sodium}mg of sodium, "
+            f"and has a glycemic index of {gi}."
+        )
+    else:
+        nutrition_note = (
+            f"Nutritional data for this food was not found in the database."
+        )
+
+    # Verdict phrase
+    verdict_phrase = {
+        'avoid':    f"should avoid {food_name}",
+        'moderate': f"should eat {food_name} only in very small amounts",
+        'safe':     f"can generally eat {food_name}",
+    }.get(ml_label, f"should be cautious about {food_name}")
 
     prompt = (
-        f"A {age}-year-old patient with {condition} asked about eating {food_name}. "
-        f"It contains {sugar}g sugar, {sodium}mg sodium, glycemic index {gi}. "
+        f"A {age}-year-old patient with {condition} {verdict_phrase}. "
+        f"{nutrition_note} "
         f"{guideline_hint} "
-        f"In 2 sentences, explain why {food_name} is a health concern "
-        f"for someone with {condition}{(' ' + top_reason) if top_reason else ''}. "
-        f"Do not say it is safe or okay."
+        f"In 2 clear sentences, explain the nutritional reason why "
+        f"this verdict applies{(' — ' + top_reason) if top_reason else ''}."
     )
 
     return prompt
 
 
 def build_final_response(ml_label: str, ml_confidence: float,
-                          shap_reasons: list, food_name: str,
-                          llm_explanation: str) -> str:
+                         shap_reasons: list, food_name: str,
+                         llm_explanation: str) -> str:
     """
-    Assembles the final user-facing response.
-    Python controls the verdict sentence — LLM only provides explanation.
+    Python controls the verdict sentence.
+    Phi-3 provides the explanation.
+    This separation prevents the LLM from contradicting the ML model.
     """
     verdict_sentences = {
         'avoid': (
@@ -59,18 +78,20 @@ def build_final_response(ml_label: str, ml_confidence: float,
 
     verdict = verdict_sentences.get(ml_label, f"Verdict: {ml_label}.")
 
-    # Top 2 SHAP reasons as bullet points
+    # SHAP key factors
     shap_text = ""
     if shap_reasons:
-        risk_factors = [
-            f"- {feat.title()}: {'risk factor' if val > 0 else 'protective factor'}"
+        factors = ", ".join([
+            f"{feat.title()} ({'risk' if val > 0 else 'protective'})"
             for feat, val in shap_reasons[:2]
-        ]
-        shap_text = "\nKey factors: " + ", ".join(
-            [f"{feat.title()} ({'risk' if val > 0 else 'protective'})"
-             for feat, val in shap_reasons[:2]]
-        )
+        ])
+        shap_text = f"Key factors: {factors}"
 
-    disclaimer = "Please consult your doctor before making dietary changes."
+    disclaimer = "Please consult your doctor before making any dietary changes."
 
-    return f"{verdict}\n\n{llm_explanation}\n{shap_text}\n\n{disclaimer}"
+    parts = [verdict, "", llm_explanation]
+    if shap_text:
+        parts.append(shap_text)
+    parts.extend(["", disclaimer])
+
+    return "\n".join(parts)

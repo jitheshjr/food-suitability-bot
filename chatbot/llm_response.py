@@ -1,7 +1,7 @@
 import ollama
 import os
 
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "tinyllama")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "phi3")
 
 def generate_response(prompt: str) -> str:
     try:
@@ -10,7 +10,12 @@ def generate_response(prompt: str) -> str:
             messages=[
                 {
                     'role': 'system',
-                    'content': 'You are a helpful diet advisor. Answer in plain English. Be direct and concise.'
+                    'content': (
+                        'You are a clinical diet advisor. '
+                        'Answer in plain English. '
+                        'Be direct, concise, and factual. '
+                        'Never exceed 3 sentences.'
+                    )
                 },
                 {
                     'role': 'user',
@@ -18,14 +23,16 @@ def generate_response(prompt: str) -> str:
                 }
             ],
             options={
-                'temperature': 0.2,
-                'num_predict': 180,
-                'top_p': 0.9,
-                'stop': ['\n\n\n', 'PATIENT:', 'FOOD:', 'KEY RISK']
+                'temperature': 0.1,
+                'num_predict': 200,
+                'top_p':       0.9,
+                'stop':        ['\n\n\n', 'PATIENT:', 'FOOD:', 'INPUT:', 'Output:']
             }
         )
         return response['message']['content'].strip()
 
     except Exception as e:
-        return (f"Unable to generate response. Error: {str(e)}. "
-                f"Please ensure Ollama is running.")
+        return (
+            f"Unable to generate a response at this time. "
+            f"Please ensure Ollama is running. (Error: {str(e)})"
+        )
