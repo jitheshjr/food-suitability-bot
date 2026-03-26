@@ -39,7 +39,6 @@ def run_conversation_turn(session_id: str, user_text: str, verbose: bool = False
         print('='*50)
 
     # ── Step 1: Session manager handles state and validation ──
-    # This calls Phi-3 for entity extraction internally
     # and merges findings into session memory
     result  = process_turn(session_id, user_text)
     action  = result['action']
@@ -119,7 +118,7 @@ def run_conversation_turn(session_id: str, user_text: str, verbose: bool = False
 
         # ── Generate LLM explanation ───────────────
         if verbose:
-            print("[6] Sending to Phi-3...")
+            print("[6] Sending to Groq (Llama 3.1 8B)...")
         llm_explanation = generate_response(prompt)
 
         # ── Assemble final response ────────────────

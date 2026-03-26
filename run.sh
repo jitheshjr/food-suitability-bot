@@ -1,13 +1,15 @@
 #!/bin/bash
 echo "Starting Food Suitability Advisor..."
 
-# Start Ollama if not running
-systemctl is-active --quiet ollama || ollama serve &
-sleep 2
-
 # Start API in background
-uvicorn api.main:app --port 9000 &
-sleep 5
+uvicorn api.main:app --port 8000 &
+API_PID=$!
+echo "API started (PID: $API_PID)"
+sleep 4
 
-# Start UI
+# Start UI (foreground — keeps script alive)
 streamlit run ui/app.py
+
+# When streamlit exits, kill the API too
+kill $API_PID 2>/dev/null
+echo "Stopped."

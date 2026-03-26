@@ -1,9 +1,12 @@
-import ollama
 import json
 import os
 import re
+from groq import Groq
+from dotenv import load_dotenv
+load_dotenv()
 
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "phi3")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 EXTRACTION_PROMPT = """You are an entity extractor for a food health advisory system.
 Extract exactly three fields from the user message:
@@ -54,26 +57,19 @@ Output:"""
 
 
 def extract_entities_llm(text: str) -> dict:
-    """
-    Uses Phi-3 to extract age, condition, food from a single message.
-    Returns structured dict. Never raises — falls back gracefully on error.
-    """
     try:
         prompt = EXTRACTION_PROMPT.replace("{TEXT}", text.replace('"', "'"))
 
-        response = ollama.chat(
-            model=OLLAMA_MODEL,
+        response = _client.chat.completions.create(
+            model=GROQ_MODEL,
             messages=[{'role': 'user', 'content': prompt}],
-            options={
-                'temperature': 0.0,
-                'num_predict': 60,
-            }
+            temperature=0.0,
+            max_tokens=60,
         )
 
-        raw = response['message']['content'].strip()
+        raw = response.choices[0].message.content.strip()
         raw = re.sub(r'```json|```', '', raw).strip()
 
-        # Extract JSON object from response
         json_match = re.search(r'\{.*?\}', raw, re.DOTALL)
         if not json_match:
             raise ValueError(f"No JSON in response: {raw[:100]}")
@@ -115,7 +111,7 @@ def extract_entities_llm(text: str) -> dict:
         }
 
     except Exception as e:
-        # Fallback — minimal regex just for age, everything else null
+        # Fallback regex for age only
         age = None
         m = re.search(r'(\d{1,3})\s*(?:year|yr)s?\s*old', text.lower())
         if m:
@@ -146,7 +142,7 @@ if __name__ == "__main__":
         "I am 30 and healthy. Can I eat white rice?",
     ]
 
-    print("LLM ENTITY EXTRACTOR — phi3")
+    print(f"LLM ENTITY EXTRACTOR — {GROQ_MODEL}")
     print("=" * 60)
     for t in tests:
         r = extract_entities_llm(t)

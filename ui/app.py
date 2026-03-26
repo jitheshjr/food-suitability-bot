@@ -21,8 +21,7 @@ if "session_id" not in st.session_state:
 
 # ── Header ────────────────────────────────────────────────────
 st.title("🥗 Food Suitability Advisor")
-st.caption("AI-powered dietary guidance using RAG + ML + Phi-3")
-
+st.caption("AI-powered dietary guidance using RAG + ML + Groq (Llama 3.1 8B)")
 # ── Sidebar ───────────────────────────────────────────────────
 with st.sidebar:
     st.header("Try an example")
@@ -59,7 +58,7 @@ with st.sidebar:
     # API status
     st.subheader("System status")
     try:
-        r = requests.get("http://localhost:9000/health", timeout=2)
+        r = requests.get("http://localhost:8000/health", timeout=2)
         if r.status_code == 200:
             st.success("API running")
         else:
@@ -180,7 +179,7 @@ if query:
                     st.error(f"API error {res.status_code}: {err}")
 
             except requests.exceptions.Timeout:
-                st.error("Request timed out — Phi-3 is still processing. Please try again.")
+                st.error("Request timed out — please try again.")
             except requests.exceptions.ConnectionError:
                 st.error("Cannot connect to API. Make sure uvicorn is running.")
             except Exception as e:

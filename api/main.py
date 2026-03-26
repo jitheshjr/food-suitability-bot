@@ -42,7 +42,7 @@ class ChatResponse(BaseModel):
 
 @app.get("/")
 def root():
-    return {"status": "running", "model": "phi3", "version": "2.0.0"}
+    return {"status": "running", "model": "groq/llama-3.1-8b-instant", "version": "2.0.0"}
 
 @app.get("/health")
 def health():

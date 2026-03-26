@@ -1,19 +1,20 @@
-import ollama
 import os
+from groq import Groq
 
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "phi3")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
 def generate_response(prompt: str) -> str:
     try:
-        response = ollama.chat(
-            model=OLLAMA_MODEL,
+        response = _client.chat.completions.create(
+            model=GROQ_MODEL,
             messages=[
                 {
                     'role': 'system',
                     'content': (
-                        'You are a clinical diet advisor. '
+                        'You are a helpful diet advisor. '
                         'Answer in plain English. '
-                        'Be direct, concise, and factual. '
+                        'Be direct, concise, and accurate. '
                         'Never exceed 3 sentences.'
                     )
                 },
@@ -22,17 +23,13 @@ def generate_response(prompt: str) -> str:
                     'content': prompt
                 }
             ],
-            options={
-                'temperature': 0.1,
-                'num_predict': 200,
-                'top_p':       0.9,
-                'stop':        ['\n\n\n', 'PATIENT:', 'FOOD:', 'INPUT:', 'Output:']
-            }
+            temperature=0.2,
+            max_tokens=200,
         )
-        return response['message']['content'].strip()
+        return response.choices[0].message.content.strip()
 
     except Exception as e:
         return (
-            f"Unable to generate a response at this time. "
-            f"Please ensure Ollama is running. (Error: {str(e)})"
+            f"I was unable to generate a response at this time. "
+            f"Error: {str(e)}"
         )
