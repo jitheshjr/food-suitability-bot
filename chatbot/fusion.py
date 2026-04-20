@@ -53,45 +53,98 @@ def build_prompt(entities: dict, food_nutrition: dict,
     return prompt
 
 
+def _humanize_food_name(food_name: str) -> str:
+    """Convert raw dataset labels into something friendlier for users."""
+    if not food_name:
+        return "This food"
+
+    text = str(food_name).replace("_", " ").strip()
+    if "," in text:
+        parts = [part.strip() for part in text.split(",") if part.strip()]
+        if len(parts) >= 2:
+            text = parts[0]
+            if len(text.split()) <= 2:
+                text = parts[1]
+        else:
+            text = parts[0]
+
+    words = [word for word in text.split() if word.lower() not in {"prepared", "entree"}]
+    cleaned = " ".join(words).strip(" ,.-")
+    return cleaned.title() if cleaned else "This food"
+
+
+def _format_rag_sources(rag_results: list) -> str:
+    """Build a short, deduplicated citations line from retrieved RAG sources."""
+    if not rag_results:
+        return ""
+
+    seen = set()
+    ordered_sources = []
+    for item in rag_results:
+        source = (item.get("source") or "").strip()
+        if source and source not in seen:
+            seen.add(source)
+            ordered_sources.append(source)
+
+    if not ordered_sources:
+        return ""
+
+    return "Sources: " + "; ".join(ordered_sources[:3])
+
+
+def _friendly_factor_text(shap_reasons: list) -> list[str]:
+    lines = []
+    for feature, value in shap_reasons[:3]:
+        direction = "increases concern" if value > 0 else "slightly lowers concern"
+        lines.append(f"{feature.title()} {direction}")
+    return lines
+
+
+def _plain_recommendation(label: str, food_name: str, condition: str | None = None) -> str:
+    condition_text = (condition or "your condition").replace("_", " ")
+    if condition_text == "healthy":
+        audience_text = "someone without a known medical condition"
+    else:
+        audience_text = f"someone with {condition_text}"
+    if label == "avoid":
+        return f"{food_name} is best avoided for {audience_text}."
+    if label == "moderate":
+        return f"{food_name} is better as an occasional choice for {audience_text}."
+    if label == "safe":
+        return f"{food_name} is generally a reasonable choice for {audience_text}."
+    return f"Be cautious with {food_name} for {audience_text}."
+
+
 def build_final_response(ml_label: str, ml_confidence: float,
                          shap_reasons: list, food_name: str,
+                         condition: str | None,
+                         rag_results: list,
                          llm_explanation: str) -> str:
     """
     Python controls the verdict sentence.
     Phi-3 provides the explanation.
     This separation prevents the LLM from contradicting the ML model.
     """
-    verdict_sentences = {
-        'avoid': (
-            f"Based on nutritional analysis, we strongly recommend "
-            f"avoiding {food_name} ({ml_confidence}% confidence)."
-        ),
-        'moderate': (
-            f"Based on nutritional analysis, {food_name} should be "
-            f"consumed in strict moderation ({ml_confidence}% confidence)."
-        ),
-        'safe': (
-            f"Based on nutritional analysis, {food_name} appears "
-            f"generally safe for your condition ({ml_confidence}% confidence)."
-        ),
-    }
-
-    verdict = verdict_sentences.get(ml_label, f"Verdict: {ml_label}.")
-
-    # SHAP key factors
-    shap_text = ""
-    if shap_reasons:
-        factors = ", ".join([
-            f"{feat.title()} ({'risk' if val > 0 else 'protective'})"
-            for feat, val in shap_reasons[:2]
-        ])
-        shap_text = f"Key factors: {factors}"
-
+    pretty_food_name = _humanize_food_name(food_name)
+    recommendation = _plain_recommendation(ml_label, pretty_food_name, condition)
+    confidence_text = f"Confidence: {ml_confidence}%"
+    factor_lines = _friendly_factor_text(shap_reasons)
+    citations_text = _format_rag_sources(rag_results)
     disclaimer = "Please consult your doctor before making any dietary changes."
 
-    parts = [verdict, "", llm_explanation]
-    if shap_text:
-        parts.append(shap_text)
-    parts.extend(["", disclaimer])
+    parts = [
+        f"Recommendation: {recommendation}",
+        "",
+        llm_explanation.strip(),
+    ]
+
+    if factor_lines:
+        parts.extend(["", "Top factors:"])
+        parts.extend([f"- {line}" for line in factor_lines])
+
+    if citations_text:
+        parts.extend(["", f"Evidence: {citations_text.replace('Sources: ', '')}"])
+
+    parts.extend(["", confidence_text, disclaimer])
 
     return "\n".join(parts)

@@ -128,6 +128,8 @@ def run_conversation_turn(session_id: str, user_text: str, verbose: bool = False
             ml_confidence=ml_confidence,
             shap_reasons=shap_reasons,
             food_name=food_name,
+            condition=entities['condition'],
+            rag_results=rag_results,
             llm_explanation=llm_explanation,
         )
 
