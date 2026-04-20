@@ -450,26 +450,17 @@ def _render_assistant_response(msg: dict):
         )
 
     if sections["top_factors"]:
-        factor_blocks = []
-        for item in sections["top_factors"]:
-            css_class = "factor-risk" if "increase" in item.lower() or "concern" in item.lower() else "factor-protective"
-            factor_blocks.append(
-                f"""
-                <div class="factor-item">
-                    <div class="factor-dot {css_class}"></div>
-                    <div class="factor-text">{item}</div>
-                </div>
-                """
-            )
         st.markdown(
-            f"""
+            """
             <div class="section-card">
                 <div class="section-label">Top factors</div>
-                {''.join(factor_blocks)}
             </div>
             """,
             unsafe_allow_html=True,
         )
+        for item in sections["top_factors"]:
+            icon = "🔴" if "increase" in item.lower() or "concern" in item.lower() else "🟢"
+            st.write(f"{icon} {item}")
 
     if sections["evidence"]:
         chips = "".join([f'<span class="source-chip">{source}</span>' for source in sections["evidence"]])
