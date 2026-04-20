@@ -8,8 +8,9 @@ def build_prompt(entities: dict, food_nutrition: dict,
     sugar     = food_nutrition.get('sugar_g', '?')
     sodium    = food_nutrition.get('sodium_mg', '?')
     gi        = food_nutrition.get('gi_value', '?')
+    found     = food_nutrition.get('found', True)
 
-    # Pick one guideline sentence
+    # Guideline hint from RAG
     guideline_hint = ""
     if rag_results:
         first_sentence = rag_results[0]['text'].split('.')[0].strip()
@@ -21,56 +22,129 @@ def build_prompt(entities: dict, food_nutrition: dict,
     if shap_reasons:
         top_feat, top_val = shap_reasons[0]
         if top_val > 0:
-            top_reason = f"especially its {top_feat}"
+            top_reason = f"particularly its {top_feat}"
+
+    # Nutrition note
+    if found:
+        nutrition_note = (
+            f"It contains {sugar}g of sugar, {sodium}mg of sodium, "
+            f"and has a glycemic index of {gi}."
+        )
+    else:
+        nutrition_note = (
+            f"Nutritional data for this food was not found in the database."
+        )
+
+    # Verdict phrase
+    verdict_phrase = {
+        'avoid':    f"should avoid {food_name}",
+        'moderate': f"should eat {food_name} only in very small amounts",
+        'safe':     f"can generally eat {food_name}",
+    }.get(ml_label, f"should be cautious about {food_name}")
 
     prompt = (
-        f"A {age}-year-old patient with {condition} asked about eating {food_name}. "
-        f"It contains {sugar}g sugar, {sodium}mg sodium, glycemic index {gi}. "
+        f"A {age}-year-old patient with {condition} {verdict_phrase}. "
+        f"{nutrition_note} "
         f"{guideline_hint} "
-        f"In 2 sentences, explain why {food_name} is a health concern "
-        f"for someone with {condition}{(' ' + top_reason) if top_reason else ''}. "
-        f"Do not say it is safe or okay."
+        f"In 2 clear sentences, explain the nutritional reason why "
+        f"this verdict applies{(' — ' + top_reason) if top_reason else ''}."
     )
 
     return prompt
 
 
+def _humanize_food_name(food_name: str) -> str:
+    """Convert raw dataset labels into something friendlier for users."""
+    if not food_name:
+        return "This food"
+
+    text = str(food_name).replace("_", " ").strip()
+    if "," in text:
+        parts = [part.strip() for part in text.split(",") if part.strip()]
+        if len(parts) >= 2:
+            text = parts[0]
+            if len(text.split()) <= 2:
+                text = parts[1]
+        else:
+            text = parts[0]
+
+    words = [word for word in text.split() if word.lower() not in {"prepared", "entree"}]
+    cleaned = " ".join(words).strip(" ,.-")
+    return cleaned.title() if cleaned else "This food"
+
+
+def _format_rag_sources(rag_results: list) -> str:
+    """Build a short, deduplicated citations line from retrieved RAG sources."""
+    if not rag_results:
+        return ""
+
+    seen = set()
+    ordered_sources = []
+    for item in rag_results:
+        source = (item.get("source") or "").strip()
+        if source and source not in seen:
+            seen.add(source)
+            ordered_sources.append(source)
+
+    if not ordered_sources:
+        return ""
+
+    return "Sources: " + "; ".join(ordered_sources[:3])
+
+
+def _friendly_factor_text(shap_reasons: list) -> list[str]:
+    lines = []
+    for feature, value in shap_reasons[:3]:
+        direction = "increases concern" if value > 0 else "slightly lowers concern"
+        lines.append(f"{feature.title()} {direction}")
+    return lines
+
+
+def _plain_recommendation(label: str, food_name: str, condition: str | None = None) -> str:
+    condition_text = (condition or "your condition").replace("_", " ")
+    if condition_text == "healthy":
+        audience_text = "someone without a known medical condition"
+    else:
+        audience_text = f"someone with {condition_text}"
+    if label == "avoid":
+        return f"{food_name} is best avoided for {audience_text}."
+    if label == "moderate":
+        return f"{food_name} is better as an occasional choice for {audience_text}."
+    if label == "safe":
+        return f"{food_name} is generally a reasonable choice for {audience_text}."
+    return f"Be cautious with {food_name} for {audience_text}."
+
+
 def build_final_response(ml_label: str, ml_confidence: float,
-                          shap_reasons: list, food_name: str,
-                          llm_explanation: str) -> str:
+                         shap_reasons: list, food_name: str,
+                         condition: str | None,
+                         rag_results: list,
+                         llm_explanation: str) -> str:
     """
-    Assembles the final user-facing response.
-    Python controls the verdict sentence — LLM only provides explanation.
+    Python controls the verdict sentence.
+    Phi-3 provides the explanation.
+    This separation prevents the LLM from contradicting the ML model.
     """
-    verdict_sentences = {
-        'avoid': (
-            f"Based on nutritional analysis, we strongly recommend "
-            f"avoiding {food_name} ({ml_confidence}% confidence)."
-        ),
-        'moderate': (
-            f"Based on nutritional analysis, {food_name} should be "
-            f"consumed in strict moderation ({ml_confidence}% confidence)."
-        ),
-        'safe': (
-            f"Based on nutritional analysis, {food_name} appears "
-            f"generally safe for your condition ({ml_confidence}% confidence)."
-        ),
-    }
+    pretty_food_name = _humanize_food_name(food_name)
+    recommendation = _plain_recommendation(ml_label, pretty_food_name, condition)
+    confidence_text = f"Confidence: {ml_confidence}%"
+    factor_lines = _friendly_factor_text(shap_reasons)
+    citations_text = _format_rag_sources(rag_results)
+    disclaimer = "Please consult your doctor before making any dietary changes."
 
-    verdict = verdict_sentences.get(ml_label, f"Verdict: {ml_label}.")
+    parts = [
+        f"Recommendation: {recommendation}",
+        "",
+        llm_explanation.strip(),
+    ]
 
-    # Top 2 SHAP reasons as bullet points
-    shap_text = ""
-    if shap_reasons:
-        risk_factors = [
-            f"- {feat.title()}: {'risk factor' if val > 0 else 'protective factor'}"
-            for feat, val in shap_reasons[:2]
-        ]
-        shap_text = "\nKey factors: " + ", ".join(
-            [f"{feat.title()} ({'risk' if val > 0 else 'protective'})"
-             for feat, val in shap_reasons[:2]]
-        )
+    if factor_lines:
+        parts.extend(["", "Top factors:"])
+        parts.extend([f"- {line}" for line in factor_lines])
 
-    disclaimer = "Please consult your doctor before making dietary changes."
+    if citations_text:
+        parts.extend(["", f"Evidence: {citations_text.replace('Sources: ', '')}"])
 
-    return f"{verdict}\n\n{llm_explanation}\n{shap_text}\n\n{disclaimer}"
+    parts.extend(["", confidence_text, disclaimer])
+
+    return "\n".join(parts)

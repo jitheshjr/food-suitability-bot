@@ -1,75 +1,152 @@
-import re
+import json
 import os
+import re
+from groq import Groq
+from dotenv import load_dotenv
+load_dotenv()
 
-CONDITIONS = {
-    'diabetes':       ['diabet', 'blood sugar', 'insulin', 'hyperglycemi'],
-    'hypertension':   ['hypertens', 'high blood pressure', 'blood pressure'],
-    'kidney_disease': ['kidney', 'renal', 'nephro', 'ckd'],
-    'healthy':        ['healthy', 'normal', 'no condition', 'no disease'],
-}
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-def extract_entities(text: str) -> dict:
-    t = text.lower().strip()
+EXTRACTION_PROMPT = """You are an entity extractor for a food health advisory system.
+Extract exactly three fields from the user message:
+1. age       — patient age as integer, or null
+2. condition — exactly one of: "diabetes", "hypertension", "kidney_disease", "healthy", or null
+3. food      — food item as short string, or null
 
-    # ── Age ──────────────────────────────────────────
-    age = None
-    age_patterns = [
-        r'(\d{1,3})\s*(?:year|yr)s?\s*old',
-        r'(?:aged?|am)\s*(\d{1,3})',
-        r'(\d{1,3})\s*(?:year|yr)s?\s*(?:of age)?',
-    ]
-    for pattern in age_patterns:
-        m = re.search(pattern, t)
+Additional rules:
+- If the message is gibberish, random characters, or has no health/food meaning → set gibberish: true, all fields null
+- "healthy" means the person has no medical condition
+- Age must be between 1 and 110, otherwise null
+- Return ONLY the JSON object — no explanation, no markdown, no extra text
+
+Output format:
+{"age": <int|null>, "condition": <str|null>, "food": <str|null>, "gibberish": <bool>}
+
+Examples:
+Input: "I am 64 years old diabetic, can I eat ice cream?"
+Output: {"age": 64, "condition": "diabetes", "food": "ice cream", "gibberish": false}
+
+Input: "sdnbsdbf sdjkfhsdfs"
+Output: {"age": null, "condition": null, "food": null, "gibberish": true}
+
+Input: "55"
+Output: {"age": 55, "condition": null, "food": null, "gibberish": false}
+
+Input: "diabetes"
+Output: {"age": null, "condition": "diabetes", "food": null, "gibberish": false}
+
+Input: "rice"
+Output: {"age": null, "condition": null, "food": "rice", "gibberish": false}
+
+Input: "hello"
+Output: {"age": null, "condition": null, "food": null, "gibberish": false}
+
+Input: "I have high blood pressure. Is biryani ok?"
+Output: {"age": null, "condition": "hypertension", "food": "biryani", "gibberish": false}
+
+Input: "can i eat chicken curry? i am 50 with kidney problems"
+Output: {"age": 50, "condition": "kidney_disease", "food": "chicken curry", "gibberish": false}
+
+Input: "!!!! ??? ###"
+Output: {"age": null, "condition": null, "food": null, "gibberish": true}
+
+Now extract:
+Input: "{TEXT}"
+Output:"""
+
+
+def extract_entities_llm(text: str) -> dict:
+    try:
+        prompt = EXTRACTION_PROMPT.replace("{TEXT}", text.replace('"', "'"))
+
+        response = _client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[{'role': 'user', 'content': prompt}],
+            temperature=0.0,
+            max_tokens=60,
+        )
+
+        raw = response.choices[0].message.content.strip()
+        raw = re.sub(r'```json|```', '', raw).strip()
+
+        json_match = re.search(r'\{.*?\}', raw, re.DOTALL)
+        if not json_match:
+            raise ValueError(f"No JSON in response: {raw[:100]}")
+
+        parsed = json.loads(json_match.group())
+
+        # Validate age
+        age = parsed.get('age')
+        if age is not None:
+            try:
+                age = int(age)
+                if not (1 <= age <= 110):
+                    age = None
+            except (ValueError, TypeError):
+                age = None
+
+        # Validate condition
+        condition = parsed.get('condition')
+        if condition not in ['diabetes', 'hypertension', 'kidney_disease', 'healthy', None]:
+            condition = None
+
+        # Validate food
+        food = parsed.get('food')
+        if food:
+            food = str(food).strip().lower()
+            bad = ['it', 'this', 'that', 'food', 'something', 'anything', '']
+            if len(food) < 2 or food in bad:
+                food = None
+
+        gibberish = bool(parsed.get('gibberish', False))
+
+        return {
+            'age':       age,
+            'condition': condition,
+            'food':      food,
+            'gibberish': gibberish,
+            'raw_text':  text,
+            'error':     None,
+        }
+
+    except Exception as e:
+        # Fallback regex for age only
+        age = None
+        m = re.search(r'(\d{1,3})\s*(?:year|yr)s?\s*old', text.lower())
         if m:
             candidate = int(m.group(1))
-            if 1 <= candidate <= 120:
+            if 1 <= candidate <= 110:
                 age = candidate
-                break
-
-    # ── Condition ─────────────────────────────────────
-    condition = None
-    for cond_key, keywords in CONDITIONS.items():
-        for kw in keywords:
-            if kw in t:
-                condition = cond_key
-                break
-        if condition:
-            break
-
-    # ── Food item ─────────────────────────────────────
-    food = None
-    food_patterns = [
-        r'(?:eat|eating|have|consume|drink|take|eating)\s+([a-z\s]+?)(?:\?|\.|\!|,|$)',
-        r'(?:can i|is it ok|is it safe|should i).*?(?:have|eat|consume|drink)\s+([a-z\s]+?)(?:\?|\.|\!|,|$)',
-        r'(?:about|regarding|for)\s+([a-z\s]+?)(?:\?|\.|\!|,|$)',
-        r'(?:craving|want to eat|like to eat)\s+([a-z\s]+?)(?:\?|\.|\!|,|$)',
-    ]
-    for pattern in food_patterns:
-        m = re.search(pattern, t)
-        if m:
-            candidate = m.group(1).strip()
-            # Filter out non-food phrases
-            skip = ['it', 'this', 'that', 'anything', 'everything', 'more']
-            if candidate and candidate not in skip and len(candidate) > 2:
-                food = candidate
-                break
-
-    return {
-        'age':       age,
-        'condition': condition,
-        'food':      food,
-        'raw_text':  text,
-    }
+        return {
+            'age':       age,
+            'condition': None,
+            'food':      None,
+            'gibberish': False,
+            'raw_text':  text,
+            'error':     str(e),
+        }
 
 
 if __name__ == "__main__":
     tests = [
-        "I am a 64 years old diabetic patient, I am craving to eat ice cream. Is that ok?",
-        "I have hypertension and I am 55 years old. Can I eat salty chips?",
-        "I am 45 and have kidney disease. Is it safe to eat chicken?",
-        "I am 30 years old and healthy. Can I consume white rice?",
+        "I am a 64 years old diabetic patient. Can I eat ice cream?",
+        "I have hypertension and I am 55. Can I eat salty chips?",
+        "sdnbsdbf sdjkfhsdfs",
+        "hello",
+        "ice cream",
+        "64",
+        "diabetes",
+        "!!!! ??? ###",
+        "can i eat biryani? i am 50 with kidney disease",
+        "I am 30 and healthy. Can I eat white rice?",
     ]
+
+    print(f"LLM ENTITY EXTRACTOR — {GROQ_MODEL}")
+    print("=" * 60)
     for t in tests:
-        result = extract_entities(t)
-        print(f"Input : {t[:60]}...")
-        print(f"Result: {result}\n")
+        r = extract_entities_llm(t)
+        print(f"\nInput : {t}")
+        print(f"Result: age={r['age']} | condition={r['condition']} | food={r['food']} | gibberish={r['gibberish']}")
+        if r.get('error'):
+            print(f"Error : {r['error']}")
