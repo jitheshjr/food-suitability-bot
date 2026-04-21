@@ -10,6 +10,8 @@ Food Suitability Advisor is a health-focused chatbot that answers questions like
 
 The current repository is best understood as a prototype or academic/demo project rather than a clinically validated medical tool.
 
+The current UI is built with Streamlit and the backend is built with FastAPI.
+
 ## Project Structure
 
 - `api/`: FastAPI backend
@@ -31,6 +33,18 @@ The current repository is best understood as a prototype or academic/demo projec
    - generates top SHAP reasons
    - asks the LLM to explain the decision in plain English
 4. The final answer includes the verdict, explanation, key factors, and visible RAG source citations.
+
+## Current Status
+
+This repository currently contains:
+
+- a FastAPI backend in `api/`
+- a Streamlit frontend in `ui/`
+- local model artifacts in `ml_model/model/`
+- a persisted Chroma vector store in `rag/vectorstore/` when generated locally
+- unit tests in `tests/`
+
+There is no separate React or Next.js frontend in the current repo state.
 
 ## Requirements
 
@@ -58,6 +72,8 @@ source env/bin/activate
 pip install -r requirements.txt
 ```
 
+If `python` is not available on your PATH in this environment, use `./env/bin/python` after activating or call the virtualenv interpreter directly.
+
 ## Running The App
 
 Start both the API and Streamlit UI:
@@ -65,6 +81,8 @@ Start both the API and Streamlit UI:
 ```bash
 ./run.sh
 ```
+
+`run.sh` expects `uvicorn` and `streamlit` to be available from the active virtual environment.
 
 Or run them separately:
 
@@ -124,7 +142,7 @@ python rag/evaluate_retrieval.py
 This repository includes lightweight unit tests for core behavior:
 
 ```bash
-python -m unittest discover -s tests -v
+./env/bin/python -m unittest discover -s tests -v
 ```
 
 The tests currently focus on:
@@ -168,6 +186,7 @@ Returns the current in-memory session state.
 - Session state is stored in memory only.
 - Food matching is heuristic and may fall back to default nutrition when a match is weak.
 - The tool is not a substitute for professional medical advice.
+- The backend loads local model and retrieval assets, so deployment requires those files to be available on the host.
 
 ## Suggested Next Improvements
 
