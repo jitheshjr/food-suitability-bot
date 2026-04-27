@@ -6,10 +6,34 @@ _sessions: dict = {}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# ONBOARDING MESSAGE
+#
+# Shown once when the user greets the bot. Asks ALL required fields upfront
+# in one friendly, non-intimidating message. User can answer everything at
+# once or spread it across multiple replies — the session merges whatever
+# is provided each turn.
+# ──────────────────────────────────────────────────────────────────────────────
+
+ONBOARDING_MESSAGE = (
+    "Hello! 👋 I'm your Food Health Advisor.\n\n"
+    "I can tell you whether a food is suitable for your health condition. "
+    "To get started, I need a few details about you:\n\n"
+    "- 🍽️ **Food** — which food would you like to check?\n"
+    "- 🎂 **Age** — how old are you?\n"
+    "- ⚕️ **Medical condition** — do you have diabetes, hypertension, kidney disease, or none?\n"
+    "- 🧍 **Gender** — male or female?\n"
+    "- 🏃 **Activity level** — sedentary, lightly active, moderately active, or very active?\n"
+    "- ⚖️ **Height & weight** — e.g. \"170 cm and 65 kg\" or \"5ft 7 and 143 lbs\"\n\n"
+    "Feel free to share everything in one message or a few — and skip anything you're unsure about. "
+    "I'll ask about anything that's still missing. 😊"
+)
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # ENRICHMENT QUESTION DEFINITIONS
 #
-# After the 3 required fields are collected, the bot asks condition-specific
-# follow-up questions to populate the optional ML features.
+# After the required fields are collected, the bot asks condition-specific
+# follow-up questions to populate the remaining optional ML features.
 #
 # Design rules:
 #   - Max 2 enrichment questions per session — avoid survey fatigue
@@ -18,6 +42,9 @@ _sessions: dict = {}
 #     "I don't know", the field stays None and the next question is asked
 #   - Each question maps to one session field via 'field'
 #   - 'condition_filter': None means asked for all conditions
+#
+# NOTE: activity_level and weight/height are now REQUIRED fields asked
+# upfront in onboarding — they are intentionally removed from here.
 # ──────────────────────────────────────────────────────────────────────────────
 
 ENRICHMENT_QUESTIONS = [
@@ -67,32 +94,7 @@ ENRICHMENT_QUESTIONS = [
             "Say **none** if you don't, or **skip** if unsure."
         ),
     },
-    # ── Question 5: Activity level (all conditions) ───────────────────────────
-    {
-        'field':            'activity_level',
-        'condition_filter': None,   # asked for all conditions
-        'check':            lambda s: s.activity_level is None,
-        'ask': (
-            "How physically active are you on a typical day?\n"
-            "- **Sedentary** — mostly sitting, little movement\n"
-            "- **Lightly active** — short walks, light housework\n"
-            "- **Moderately active** — exercise 3–4 times a week\n"
-            "- **Very active** — daily workouts or physical job\n"
-            "Say **skip** if you'd rather not answer."
-        ),
-    },
-    # ── Question 6: Weight (all conditions — used for BMI) ────────────────────
-    {
-        'field':            'weight_kg',
-        'condition_filter': None,
-        'check':            lambda s: s.weight_kg is None and s.height_cm is None,
-        'ask': (
-            "Could you share your **weight and height**? "
-            "(e.g. \"70 kg and 170 cm\" or \"154 lbs and 5ft 7\") "
-            "This helps us personalise the analysis. Say **skip** to continue without it."
-        ),
-    },
-    # ── Question 7: Medication (kidney_disease + hypertension most impactful) ──
+    # ── Question 5: Medication (kidney_disease + hypertension most impactful) ──
     {
         'field':            'medication',
         'condition_filter': ['kidney_disease', 'hypertension', 'diabetes'],
@@ -120,38 +122,53 @@ class SessionState:
     Accumulates patient profile fields across multiple conversation turns.
 
     Collection phases:
-      Phase 1 — Required fields: food → age → condition
+      Phase 0 — Greeting: show onboarding message with all required fields listed
+      Phase 1 — Required fields: food, age, condition, gender, activity_level,
+                                 height_cm / weight_kg
       Phase 2 — Enrichment:     condition-specific follow-up questions (max 2)
       Phase 3 — Run pipeline
 
-    The transition from Phase 1 → Phase 2 → Phase 3 is managed by
-    process_turn() using enrichment_index to track which question is next.
+    Required fields that the user explicitly cannot answer:
+      - condition: defaults to "healthy" with a polite note
+      - gender / activity_level / height_cm / weight_kg: skipped gracefully,
+        pipeline runs without them after one patient reminder
+
+    The transition Phase 1 → Phase 2 → Phase 3 is managed by process_turn()
+    using enrichment_index to track which question is next.
     """
 
     def __init__(self):
         # ── Required ──────────────────────────────────────────────
-        self.age       = None
-        self.condition = None
-        self.food      = None
-
-        # ── Optional patient fields ───────────────────────────────
+        self.age            = None
+        self.condition      = None
+        self.food           = None
         self.gender         = None
+        self.activity_level = None
         self.height_cm      = None
         self.weight_kg      = None
-        self.activity_level = None
+
+        # ── Optional patient fields ───────────────────────────────
         self.ckd_stage      = None
         self.dialysis_type  = None
         self.diabetes_type  = None
         self.comorbidity    = None
         self.medication     = None
 
+        # ── Healthy fallback note ─────────────────────────────────
+        # Set to True when condition is defaulted to healthy because
+        # the user said they don't know — included in the pipeline response.
+        self.assumed_healthy = False
+
         # ── Enrichment tracking ───────────────────────────────────
-        # enrichment_index: which question in ENRICHMENT_QUESTIONS was last asked
-        # enrichment_asked: how many enrichment questions have been asked so far
-        # enrichment_phase: True once required fields are done and we're asking extras
         self.enrichment_index = 0
         self.enrichment_asked = 0
         self.enrichment_phase = False
+
+        # ── Required field skip tracking ──────────────────────────
+        # Counts how many turns the user has been asked for optional-required
+        # fields (gender, activity, height/weight) without providing them.
+        # After 1 reminder, we proceed to enrichment/pipeline anyway.
+        self.profile_reminder_count = 0
 
         # ── Session meta ──────────────────────────────────────────
         self.step       = 'idle'
@@ -166,7 +183,6 @@ class SessionState:
             self.condition = extracted['condition']
         if extracted.get('food') and not self.food:
             self.food = extracted['food']
-
         if extracted.get('gender') and not self.gender:
             self.gender = extracted['gender']
         if extracted.get('height_cm') and not self.height_cm:
@@ -186,7 +202,27 @@ class SessionState:
         if extracted.get('medication') and not self.medication:
             self.medication = extracted['medication']
 
+    def core_required_complete(self) -> bool:
+        """food + age + condition — these three are non-negotiable."""
+        return bool(self.food and self.age and self.condition)
+
+    def profile_fields_missing(self) -> list:
+        """
+        Returns which profile-level required fields (gender, activity,
+        height/weight) are still missing. These are asked after the core
+        three are collected, but are skippable after one reminder.
+        """
+        missing = []
+        if not self.gender:
+            missing.append('gender')
+        if not self.activity_level:
+            missing.append('activity_level')
+        if not self.height_cm and not self.weight_kg:
+            missing.append('height_weight')
+        return missing
+
     def required_missing(self) -> list:
+        """Legacy helper — returns missing core required fields."""
         missing = []
         if not self.food:      missing.append('food')
         if not self.age:       missing.append('age')
@@ -209,15 +245,12 @@ class SessionState:
 
         for i in range(self.enrichment_index, len(ENRICHMENT_QUESTIONS)):
             q = ENRICHMENT_QUESTIONS[i]
-            # Check condition filter
             if q['condition_filter'] is not None:
                 if self.condition not in q['condition_filter']:
                     continue
-            # Check if field still needs to be collected
             if not q['check'](self):
                 continue
-            # This question is applicable
-            self.enrichment_index = i + 1   # advance past this one
+            self.enrichment_index = i + 1
             return q
         return None
 
@@ -238,21 +271,22 @@ class SessionState:
 
     def to_dict(self) -> dict:
         return {
-            'age':             self.age,
-            'condition':       self.condition,
-            'food':            self.food,
-            'gender':          self.gender,
-            'height_cm':       self.height_cm,
-            'weight_kg':       self.weight_kg,
-            'activity_level':  self.activity_level,
-            'ckd_stage':       self.ckd_stage,
-            'dialysis_type':   self.dialysis_type,
-            'diabetes_type':   self.diabetes_type,
-            'comorbidity':     self.comorbidity,
-            'medication':      self.medication,
-            'enrichment_asked':self.enrichment_asked,
-            'step':            self.step,
-            'turns':           self.turns,
+            'age':              self.age,
+            'condition':        self.condition,
+            'food':             self.food,
+            'gender':           self.gender,
+            'height_cm':        self.height_cm,
+            'weight_kg':        self.weight_kg,
+            'activity_level':   self.activity_level,
+            'ckd_stage':        self.ckd_stage,
+            'dialysis_type':    self.dialysis_type,
+            'diabetes_type':    self.diabetes_type,
+            'comorbidity':      self.comorbidity,
+            'medication':       self.medication,
+            'assumed_healthy':  self.assumed_healthy,
+            'enrichment_asked': self.enrichment_asked,
+            'step':             self.step,
+            'turns':            self.turns,
         }
 
     def reset(self):
@@ -272,83 +306,143 @@ def clear_session(session_id: str):
         _sessions[session_id].reset()
 
 
-# ── Required field questions ──────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────────────────
+# REQUIRED FIELD PROMPTS
+# ──────────────────────────────────────────────────────────────────────────────
 
-def _ask_for_required(session: SessionState, gibberish: bool = False) -> str:
+def _ask_for_core_required(session: SessionState, gibberish: bool = False) -> str:
+    """
+    Asks for whichever of the 3 core required fields (food, age, condition)
+    are still missing. Called one field at a time — most natural for the
+    user since these are the most important questions.
+    """
     if gibberish:
         return (
-            "I'm sorry, I couldn't understand that. To help you, I need:\n\n"
+            "I'm sorry, I couldn't understand that. 😊 To help you, I need:\n\n"
             "- The **food** you'd like to check\n"
             "- Your **age**\n"
             "- Your **medical condition** (diabetes, hypertension, kidney disease, or none)\n\n"
-            "Example: \"I am 45 years old with diabetes, can I eat rice?\""
+            "Example: *\"I am 45 years old with diabetes, can I eat rice?\"*"
         )
 
     missing = session.required_missing()
 
     if 'food' in missing:
-        return "I'd be happy to help! Which **food** would you like to check?"
+        return "Of course! Which **food** would you like me to check for you?"
 
     if 'age' in missing:
         return (
             f"Got it — you'd like to know about **{session.food}**. "
-            "Could you share your **age**?"
+            "Could you also share your **age**?"
         )
 
     if 'condition' in missing:
         return (
             "Almost there! Do you have any medical conditions such as "
             "**diabetes**, **hypertension**, or **kidney disease**? "
-            "If you have none, just say **healthy**."
+            "If you have none, just say **healthy** — "
+            "or if you're not sure, I'll assume you're healthy. 😊"
         )
 
     return None
 
 
-# ── Main entry point ──────────────────────────────────────────────────────────
+def _build_profile_reminder(session: SessionState) -> str:
+    """
+    After core required fields are collected, gently asks for whichever
+    profile fields (gender, activity level, height/weight) are still missing.
+    Shows only what's still needed — never repeats what's already provided.
+    Called at most once; after that the pipeline runs regardless.
+    """
+    missing = session.profile_fields_missing()
+    parts = []
+
+    if 'gender' in missing:
+        parts.append("- 🧍 **Gender** — male or female?")
+    if 'activity_level' in missing:
+        parts.append(
+            "- 🏃 **Activity level** — sedentary, lightly active, "
+            "moderately active, or very active?"
+        )
+    if 'height_weight' in missing:
+        parts.append(
+            "- ⚖️ **Height & weight** — e.g. *\"170 cm and 65 kg\"* "
+            "or *\"5ft 7 and 143 lbs\"*"
+        )
+
+    if not parts:
+        return None
+
+    intro = (
+        "Just a couple more details to make the analysis more accurate — "
+        "feel free to skip anything you'd rather not share:\n\n"
+    )
+    outro = "\n\nOr just say **skip** to continue without these. 😊"
+    return intro + "\n".join(parts) + outro
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# HEALTHY FALLBACK
+#
+# If the user explicitly says they don't know their condition after being asked,
+# we default condition to "healthy" and set assumed_healthy = True.
+# The pipeline response layer must check assumed_healthy and prepend the note.
+# ──────────────────────────────────────────────────────────────────────────────
+
+_CONDITION_SKIP_PHRASES = {
+    'skip', 'idk', "don't know", "dont know", "not sure", "no idea",
+    'unsure', 'unknown', "i don't know", "i dont know", "not sure about",
+    "no clue", "no idea", "haven't checked", "havent checked",
+}
+
+def _user_skipped_condition(text: str) -> bool:
+    tl = text.strip().lower()
+    return any(p in tl for p in _CONDITION_SKIP_PHRASES) and len(tl) < 35
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# MAIN ENTRY POINT
+# ──────────────────────────────────────────────────────────────────────────────
 
 def process_turn(session_id: str, user_text: str) -> dict:
     """
     Processes one conversation turn.
 
-    Phase 1 — Collect required fields (food, age, condition).
+    Phase 0 — Greeting: show onboarding message listing all required fields.
+    Phase 1 — Collect core required fields (food, age, condition).
+               If condition is skipped/unknown → assume healthy, set note.
+    Phase 1b— Collect profile fields (gender, activity, height/weight).
+               Asked once as a gentle reminder; skippable.
     Phase 2 — Ask enrichment questions (condition-specific, max 2).
     Phase 3 — Run pipeline.
-
-    Enrichment questions are skippable — if the user says "skip" or "I don't know",
-    the field stays None and we move to the next question or run the pipeline.
     """
     session = get_session(session_id)
     session.turns += 1
     t  = user_text.strip()
     tl = t.lower()
 
-    # ── Trivial inputs ────────────────────────────────────────────
-
+    # ── Empty input ───────────────────────────────────────────────
     if not t:
         return {
             'action':      'reject',
-            'message':     "Your message appears to be empty. Please tell me which food you'd like to check.",
+            'message':     "Your message seems empty. Please tell me which food you'd like to check. 😊",
             'session':     session,
             'input_class': 'empty',
         }
 
+    # ── Greeting → show full onboarding message ───────────────────
     greetings = ['hi', 'hello', 'hey', 'good morning', 'good evening', 'good afternoon', 'hiya', 'howdy']
     if any(tl == g or tl.startswith(g + ' ') for g in greetings):
         return {
             'action':      'greet',
-            'message':     (
-                "Hello! I'm your food health advisor.\n\n"
-                "I can tell you whether a food is suitable for your health condition. "
-                "To get started — which **food** would you like to check?"
-            ),
+            'message':     ONBOARDING_MESSAGE,
             'session':     session,
             'input_class': 'greeting',
         }
 
-    # Word-boundary thanks check — prevents "type 2" matching "ty"
+    # ── Thanks ────────────────────────────────────────────────────
     thanks = ['thank you', 'thanks', 'thx']
-    thanks_exact = ['ty', 'thank']   # only match these as whole words
+    thanks_exact = ['ty', 'thank']
     is_thanks = (
         any(w in tl for w in thanks) or
         any(tl == w or tl.startswith(w + ' ') or tl.endswith(' ' + w)
@@ -357,18 +451,19 @@ def process_turn(session_id: str, user_text: str) -> dict:
     if is_thanks and len(tl) < 30:
         return {
             'action':      'thanks',
-            'message':     "You're welcome! Feel free to ask about another food anytime.",
+            'message':     "You're welcome! 😊 Feel free to ask about another food anytime.",
             'session':     session,
             'input_class': 'thanks',
         }
 
+    # ── Reset ─────────────────────────────────────────────────────
     resets = ['reset', 'start over', 'restart', 'new question', 'clear', 'begin again']
     if any(w in tl for w in resets):
         clear_session(session_id)
         session = get_session(session_id)
         return {
             'action':      'reset',
-            'message':     "Sure, let's start fresh! Which **food** would you like to check?",
+            'message':     "Sure, let's start fresh! 😊\n\n" + ONBOARDING_MESSAGE,
             'session':     session,
             'input_class': 'reset',
         }
@@ -378,30 +473,56 @@ def process_turn(session_id: str, user_text: str) -> dict:
     session.update_from_extraction(extracted)
     session.step = 'collecting'
 
-    # ── Phase 1: Required fields ──────────────────────────────────
+    # ── Phase 1: Core required fields (food, age, condition) ──────
     if not session.required_complete():
-        message = _ask_for_required(session, gibberish=extracted.get('gibberish', False))
-        return {
-            'action':      'ask_missing',
-            'message':     message,
-            'session':     session,
-            'input_class': 'partial',
-        }
+
+        # Special case: user is being asked for condition and says they don't know
+        if session.food and session.age and not session.condition:
+            if _user_skipped_condition(t):
+                session.condition    = 'healthy'
+                session.assumed_healthy = True
+                # Fall through to profile / enrichment below
+
+        # Re-check after possible healthy fallback
+        if not session.required_complete():
+            msg = _ask_for_core_required(session, gibberish=extracted.get('gibberish', False))
+            return {
+                'action':      'ask_missing',
+                'message':     msg,
+                'session':     session,
+                'input_class': 'partial',
+            }
+
+    # ── Phase 1b: Profile fields (gender, activity, height/weight) ─
+    # Ask once as a polite reminder. After one reminder, proceed regardless.
+    profile_missing = session.profile_fields_missing()
+    if profile_missing and session.profile_reminder_count == 0:
+        # Check if the user already provided some in this turn — if all gone, skip reminder
+        user_skipped_profile = any(p in tl for p in SKIP_PHRASES) and len(tl) < 25
+        if not user_skipped_profile:
+            reminder_msg = _build_profile_reminder(session)
+            if reminder_msg:
+                session.profile_reminder_count += 1
+                return {
+                    'action':      'ask_profile',
+                    'message':     reminder_msg,
+                    'session':     session,
+                    'input_class': 'profile_reminder',
+                }
+
+    # Profile reminder was shown — mark it done regardless of what user answered
+    if session.profile_reminder_count == 0:
+        session.profile_reminder_count = 1   # don't ask again
 
     # ── Phase 2: Enrichment questions ─────────────────────────────
-    # Required fields are now complete. Enter enrichment phase.
     session.enrichment_phase = True
 
-    # Check if user's reply was a skip phrase
     user_skipped = any(p in tl for p in SKIP_PHRASES) and len(tl) < 25
 
     if not user_skipped:
-        # Normal answer — extraction already merged whatever was found
-        # Additional check: if user said "none" for comorbidity, store it explicitly
         if 'none' in tl and session.comorbidity is None and len(tl) < 20:
             session.comorbidity = 'none'
 
-    # Find the next enrichment question to ask
     next_q = session.next_enrichment_question()
 
     if next_q is not None:
@@ -417,8 +538,9 @@ def process_turn(session_id: str, user_text: str) -> dict:
     # ── Phase 3: All done — run pipeline ─────────────────────────
     session.step = 'ready'
     return {
-        'action':      'run_pipeline',
-        'message':     None,
-        'session':     session,
-        'input_class': 'complete',
+        'action':        'run_pipeline',
+        'message':       None,
+        'assumed_healthy': session.assumed_healthy,   # pipeline layer uses this
+        'session':       session,
+        'input_class':   'complete',
     }

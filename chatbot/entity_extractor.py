@@ -23,15 +23,19 @@ REQUIRED fields (extract if mentioned):
 - age        : integer 1-110, or null
 - condition  : one of "diabetes", "hypertension", "kidney_disease", "healthy", or null
 - food       : short food name string, or null
-
-OPTIONAL fields (only fill if the user EXPLICITLY mentions them — never guess):
 - gender          : "male" or "female", or null
-- ckd_stage       : integer 1-5 (only if user says e.g. "stage 3 kidney disease"), or null
 - activity_level  : one of "sedentary", "lightly_active", "moderately_active", "very_active", or null
                     Map: "not active/sit all day/lazy" → "sedentary"
                          "light walk/not very active" → "lightly_active"
                          "moderate exercise/gym sometimes" → "moderately_active"
                          "very active/athlete/workout daily" → "very_active"
+- height_cm       : integer in cm, or null (convert feet/inches if mentioned)
+- weight_kg       : float in kg, or null (convert lbs if mentioned: lbs * 0.453592)
+
+OPTIONAL fields (only fill if the user EXPLICITLY mentions them — never guess):
+
+- ckd_stage       : integer 1-5 (only if user says e.g. "stage 3 kidney disease"), or null
+
 - comorbidity     : one of "diabetes", "hypertension", "kidney_disease", "obesity", "anemia", "none", or null
                     Only fill if it is a SECONDARY condition (not the primary condition field)
 - medication      : one of "ace_inhibitor", "arb", "phosphate_binder", "diuretic",
@@ -40,8 +44,6 @@ OPTIONAL fields (only fill if the user EXPLICITLY mentions them — never guess)
                                      "losartan/valsartan/olmesartan" → "arb"
                                      "furosemide/hydrochlorothiazide/HCTZ" → "diuretic"
                                      "atenolol/metoprolol/bisoprolol" → "beta_blocker"
-- height_cm       : integer in cm, or null (convert feet/inches if mentioned)
-- weight_kg       : float in kg, or null (convert lbs if mentioned: lbs * 0.453592)
 - dialysis_type   : one of "hemodialysis", "peritoneal", "none", or null
 - diabetes_type   : one of "type1", "type2", or null
 
@@ -218,6 +220,7 @@ def extract_entities_llm(text: str) -> dict:
     try:
         prompt = EXTRACTION_PROMPT.replace("{TEXT}", text.replace('"', "'"))
 
+        # LLM API Call
         response = _client.chat.completions.create(
             model=GROQ_MODEL,
             messages=[{'role': 'user', 'content': prompt}],
@@ -249,14 +252,14 @@ def extract_entities_llm(text: str) -> dict:
             'age':           _validate_age(parsed.get('age')),
             'condition':     _validate_enum(parsed.get('condition'), VALID_CONDITIONS),
             'food':          _validate_food(parsed.get('food')),
-            # Optional patient fields
             'gender':        _validate_enum(parsed.get('gender'), VALID_GENDERS),
-            'ckd_stage':     ckd_stage,
             'activity_level':_validate_enum(parsed.get('activity_level'), VALID_ACTIVITY),
-            'comorbidity':   _validate_enum(parsed.get('comorbidity'), VALID_COMORBIDITY),
-            'medication':    _validate_enum(parsed.get('medication'), VALID_MEDICATION),
             'height_cm':     height_cm,
             'weight_kg':     weight_kg,
+            # Optional patient fields
+            'ckd_stage':     ckd_stage,
+            'comorbidity':   _validate_enum(parsed.get('comorbidity'), VALID_COMORBIDITY),
+            'medication':    _validate_enum(parsed.get('medication'), VALID_MEDICATION),
             'dialysis_type': dialysis_raw,
             'diabetes_type': _validate_enum(parsed.get('diabetes_type'), VALID_DIABETES_TYPE),
             # Meta
