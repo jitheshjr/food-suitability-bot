@@ -240,6 +240,15 @@ def compute_label(
         if ckd_stage and ckd_stage < 5 and protein > 25:
             score += 0.5
 
+    # ── Age + condition modifier ──────────────────────────────────
+    if age >= 65:
+        if condition == 'diabetes' and gi > 55:
+            score += 0.5
+        if condition == 'kidney_disease' and potassium > 800:
+            score += 0.5
+        if condition == 'hypertension' and sodium > 300:
+            score += 0.5
+
     # ── Age modifier ──────────────────────────────────────────────
 
     if age >= 65:
@@ -295,21 +304,23 @@ print(f"Generating {N_ROWS} synthetic patient-food records...")
 condition_list = stratified_condition_sample(N_ROWS)
 rows = []
 
+def safe_get(col, default=0.0):
+    val = food_row.get(col, default)
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return default
+    return float(val)
+
+def safe_str(col, default=None):
+    val = food_row.get(col, default)
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return default
+    return str(val)
+
+foods = foods[foods['gi_value'].notna()].reset_index(drop=True)
+
 for condition in condition_list:
     patient  = generate_patient(condition)
     food_row = foods.sample(1).iloc[0]
-
-    def safe_get(col, default=0.0):
-        val = food_row.get(col, default)
-        if val is None or (isinstance(val, float) and np.isnan(val)):
-            return default
-        return float(val)
-
-    def safe_str(col, default=None):
-        val = food_row.get(col, default)
-        if val is None or (isinstance(val, float) and np.isnan(val)):
-            return default
-        return str(val)
 
     cal        = safe_get('calories')
     protein    = safe_get('protein_g')
@@ -322,10 +333,8 @@ for condition in condition_list:
     phosphorus = safe_get('phosphorus_mg')
 
     gi_raw = food_row.get('gi_value', None)
-    gi     = float(gi_raw) if (
-        gi_raw is not None and
-        not (isinstance(gi_raw, float) and np.isnan(gi_raw))
-    ) else 50.0
+  
+    gi = float(gi_raw)
 
     # NEW: food metadata from preprocess_foods.py
     canonical_name     = safe_str('canonical_name', food_row.get('food_name', ''))
@@ -341,12 +350,14 @@ for condition in condition_list:
     cuisine            = safe_str('cuisine')
     is_composite       = bool(food_row.get('is_composite_dish', False))
 
+    ckd_stage_val = patient['ckd_stage'] if patient['ckd_stage'] else 3
+
     label = compute_label(
         age=patient['age'], gender=patient['gender'],
         bmi=patient['bmi'], bmi_category=patient['bmi_category'],
         condition=condition, activity=patient['activity_level'],
         comorbidity=patient['comorbidity'], medication=patient['medication'],
-        ckd_stage=patient['ckd_stage'] if patient['ckd_stage'] else 3,
+        ckd_stage=ckd_stage_val,
         dialysis_type=patient['dialysis_type'],
         diabetes_type=patient['diabetes_type'],
         cal=cal, protein=protein, fat=fat, carbs=carbs,
@@ -367,7 +378,7 @@ for condition in condition_list:
 
         # ── Clinical profile ───────────────────────────────────────
         'condition':        condition,
-        'ckd_stage':        patient['ckd_stage'],
+        'ckd_stage':        ckd_stage_val,
         'dialysis_type':    patient['dialysis_type'],
         'diabetes_type':    patient['diabetes_type'],
         'comorbidity':      patient['comorbidity'],

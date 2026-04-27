@@ -1,22 +1,9 @@
 import pandas as pd
 from difflib import SequenceMatcher
+import re
 
 foods = pd.read_csv("processed/foods_clean.csv")
 gi    = pd.read_csv("raw/glycemic_index.csv")
-
-# ──────────────────────────────────────────────────────────────────────────────
-# CHANGE vs previous version:
-# GI matching now runs on canonical_name (clean short name from preprocess_foods.py)
-# instead of food_name (raw verbose USDA string).
-#
-# Before: "lamb, australian, imported, fresh, rib chop/rack roast, frenched,
-#          bone-in, separable lean and fat, trimmed to 1/8\" fat, raw"
-# After:  "lamb rib chop"
-#
-# This dramatically improves both exact-keyword and fuzzy match accuracy,
-# and eliminates false matches caused by preparation/cut words appearing
-# in the long raw string (e.g. "drained" fuzzy-matching "grain").
-# ──────────────────────────────────────────────────────────────────────────────
 
 # Foods that biologically carry near-zero GI
 # (proteins / pure fats produce no glucose spike)
@@ -32,6 +19,11 @@ NO_GI_KEYWORDS = [
 # (e.g. "pork" matching "corn" at lower threshold)
 FUZZY_THRESHOLD = 0.65
 
+def is_biological_zero(name: str) -> bool:
+    for k in NO_GI_KEYWORDS:
+        if re.search(rf'\b{re.escape(k)}\b', name):
+            return True
+    return False
 
 def best_gi_match(canonical_name: str, gi_df: pd.DataFrame):
     """
@@ -46,6 +38,9 @@ def best_gi_match(canonical_name: str, gi_df: pd.DataFrame):
          -> NOT silently defaulted to 50 (which corrupted diabetes labels)
     """
     name_lower = str(canonical_name).lower().strip()
+
+    if is_biological_zero(name_lower):
+        return 0, 'low', 'biological_zero'
 
     # -- Priority 1: biological zero ------------------------------------------
     if any(k in name_lower for k in NO_GI_KEYWORDS):
@@ -73,10 +68,6 @@ def best_gi_match(canonical_name: str, gi_df: pd.DataFrame):
 
     return best_gi, best_cat, best_type
 
-
-# ──────────────────────────────────────────────────────────────────────────────
-# APPLY MATCHING  — use canonical_name, not food_name
-# ──────────────────────────────────────────────────────────────────────────────
 
 print("Matching GI values to canonical food names...")
 
