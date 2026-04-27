@@ -23,9 +23,6 @@ __pycache__/
 # Jupyter
 .ipynb_checkpoints/
 
-# Saved models
-ml_model/model/*.pkl
-
 # Vector store (regenerate from documents)
 rag/vectorstore/
 
