@@ -73,71 +73,43 @@ SKIP_WORDS = {
 # Lower than this causes wrong matches (e.g. "rice" → "spice")
 FUZZY_THRESHOLD = 0.55   # slightly looser than GI matching since user queries are short
 
-
 def lookup_food(food_name: str) -> dict:
-    """
-    Look up nutrition and metadata for a food name.
-
-    Match priority:
-      1. Exact substring match on canonical_name  (best — short clean names)
-      2. Exact substring match on food_name       (fallback for uncleaned rows)
-      3. Word-level match on canonical_name
-      4. Word-level match on food_name
-      5. Fuzzy match on canonical_name
-      6. Return DEFAULT_NUTRITION with found=False
-    """
     if not food_name:
         return DEFAULT_NUTRITION.copy()
 
     query = food_name.lower().strip()
 
-    # ── 1. Exact match on canonical_name ──────────────────────────
-    mask = _foods_df['canonical_lower'].str.contains(query, na=False, regex=False)
+    # ── 1. Exact match on canonical_name ──
+    mask = _foods_df['canonical_lower'] == query
     matches = _foods_df[mask]
     if not matches.empty:
         return _row_to_dict(matches.iloc[0])
 
-    # ── 2. Exact match on full food_name ──────────────────────────
+    # ── 2. Substring match ONLY on food_name ──
     mask = _foods_df['food_name_lower'].str.contains(query, na=False, regex=False)
     matches = _foods_df[mask]
+
     if not matches.empty:
         return _row_to_dict(matches.iloc[0])
 
-    # ── 3. Word-level match on canonical_name ─────────────────────
-    words = [w for w in query.split() if len(w) >= 4 and w not in SKIP_WORDS]
-    for word in words:
-        mask = _foods_df['canonical_lower'].str.contains(word, na=False, regex=False)
-        matches = _foods_df[mask]
-        if not matches.empty:
-            return _row_to_dict(matches.iloc[0])
-
-    # ── 4. Word-level match on food_name (broader) ────────────────
-    for word in words:
-        mask = _foods_df['food_name_lower'].str.contains(word, na=False, regex=False)
-        matches = _foods_df[mask]
-        if not matches.empty:
-            return _row_to_dict(matches.iloc[0])
-
-    # ── 5. Fuzzy match on canonical_name ──────────────────────────
-    # Only scan canonical_lower — much faster than scanning full raw names
+    # ── 3. Fuzzy match (restricted) ──
     best_score = 0
-    best_row   = None
+    best_row = None
+
     for _, row in _foods_df.iterrows():
-        score = SequenceMatcher(None, query, row['canonical_lower']).ratio()
+        score = SequenceMatcher(None, query, row['food_name_lower']).ratio()
         if score > best_score:
             best_score = score
-            best_row   = row
+            best_row = row
 
-    if best_score >= FUZZY_THRESHOLD and best_row is not None:
+    if best_score >= 0.75:
         return _row_to_dict(best_row)
 
-    # ── 6. Not found ──────────────────────────────────────────────
-    print(f"  Food not found: '{food_name}' — using conservative defaults")
+    # ── 4. Not found ──
     result = DEFAULT_NUTRITION.copy()
-    result['food_name']      = food_name
+    result['food_name'] = food_name
     result['canonical_name'] = food_name
     return result
-
 
 def _safe_float(val, default=0.0) -> float:
     """Convert to float safely, returning default for None/NaN."""
@@ -219,7 +191,7 @@ def _row_to_dict(row) -> dict:
 if __name__ == "__main__":
     tests = [
         'ice cream', 'white rice', 'banana', 'chicken pasta',
-        'salmon', 'biryani', 'chips', 'spinach', 'xyz123'
+        'salmon', 'biryani', 'chips', 'spinach', 'xyz123', 'fish'
     ]
     print(f"{'Food':<20} {'Found':<6} {'K(mg)':<8} {'P(mg)':<8} {'Na(mg)':<8} {'GI':<6} {'Category'}")
     print("-" * 75)
