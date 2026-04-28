@@ -245,6 +245,7 @@ def run_conversation_turn(session_id: str, user_text: str, verbose: bool = False
             'proba_dict':    proba_dict,      # NEW
             'entities':      entities,
             'shap_reasons':  shap_reasons,
+            'rag_results':   rag_results,
             'session':       session.to_dict(),
             'action':        'run_pipeline',
         }
@@ -267,6 +268,7 @@ def run_conversation_turn(session_id: str, user_text: str, verbose: bool = False
             'proba_dict':    None,
             'entities':      entities,
             'shap_reasons':  None,
+            'rag_results':   rag_results,
             'session':       session.to_dict(),
             'action':        'error',
         }

@@ -541,6 +541,59 @@ def _render_assistant_response(msg: dict):
             unsafe_allow_html=True,
         )
 
+    rag = msg.get("rag_results") or []
+    if rag:
+        with st.expander("📄 Retrieved Evidence", expanded=False):
+            for i, chunk in enumerate(rag):
+                st.write(chunk)
+                score = chunk.get("score", 0)
+                text  = chunk.get("text", "").strip()
+                src   = chunk.get("source", "Unknown source")
+
+                # Score bar colour — green if strong, yellow if moderate
+                bar_color = (
+                    "#22c55e" if score >= 0.75 else
+                    "#f59e0b" if score >= 0.55 else
+                    "#94a3b8"
+                )
+
+                st.markdown(
+                    f"""
+                    <div style="
+                        border: 1px solid rgba(99,149,220,0.18);
+                        border-radius: 12px;
+                        padding: 0.9rem 1rem;
+                        margin-bottom: 0.75rem;
+                        background: #f8fafc;
+                    ">
+                        <div style="display:flex; justify-content:space-between; 
+                                    align-items:center; margin-bottom:0.5rem;">
+                            <span style="
+                                font-size:0.7rem; font-weight:700;
+                                text-transform:uppercase; letter-spacing:0.08em;
+                                color:#64748b;
+                            ">Chunk {i+1} · {src}</span>
+                            <span style="
+                                background:{bar_color}22;
+                                color:{bar_color};
+                                border:1px solid {bar_color}55;
+                                border-radius:999px;
+                                padding:0.2rem 0.6rem;
+                                font-size:0.72rem;
+                                font-weight:700;
+                            ">score {score:.3f}</span>
+                        </div>
+                        <div style="
+                            font-size:0.9rem; line-height:1.65;
+                            color:#334155;
+                            border-left: 3px solid {bar_color};
+                            padding-left: 0.75rem;
+                        ">{text}</div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+
     ents = msg.get("entities")
     if ents:
         st.markdown(
@@ -614,10 +667,15 @@ st.markdown(
 with st.sidebar:
     st.markdown("### Try an example")
     examples = [
-        "I am 64 years old diabetic. I am a male. Can I eat ice cream?",
-        "I am 55 with hypertension. Is it safe to eat chips? I am a slightly active male and my height and weight are 175 cm and 675 kg.",
-        "I am 45 with kidney disease - stage 3. Can I eat chicken?",
-        "I am 30 and healthy. Can I eat white rice daily?",
+        "I am a 60 year old male with diabetes. I have type 2 diabetes and a sedentary lifestyle. Can I consume beverages?",
+        "I am a 58 year old female with hypertension. I take diuretics and have low activity levels. Is it safe for me to eat salted potato chips?",
+        "I am a 50 year old male with kidney disease stage 4 and I am on medication. Can I eat blueberries?",
+        "I am 73 year old male, with height 81kg and height 158cm. i have kidney disease stage 3. i am a lightly active person. Can i eat pork?",
+        "I am a 35 year old female with hypertension and I follow a moderately active lifestyle. Is it safe to eat spinach?",
+        "I am a 40 year old male with diabetes. I am physically active and maintain a normal BMI. Can I eat pineapple?",
+        "I am a 45 year old male with diabetes. I am moderately active. Can I eat whole pasta?",
+        "I am a 30 year old healthy male. Can I eat Pineapple?"
+
     ]
     for ex in examples:
         if st.button(ex[:42] + "...", use_container_width=True):
@@ -710,6 +768,7 @@ if query:
                         conf  = data.get("ml_confidence", 0)
                         ents = data.get("entities") or {}
                         shap = data.get("shap_reasons") or []
+                        rag   = data.get("rag_results") or []
 
                         assistant_message = {
                             "role":          "assistant",
@@ -718,6 +777,7 @@ if query:
                             "ml_confidence": conf,
                             "entities":      ents,
                             "shap_reasons":  shap,
+                            "rag_results":   rag,
                         }
                         _render_assistant_response(assistant_message)
                         st.session_state.messages.append(assistant_message)
