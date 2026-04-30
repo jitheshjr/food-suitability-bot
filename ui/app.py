@@ -670,7 +670,7 @@ with st.sidebar:
         "I am a 60 year old male with diabetes. I have type 2 diabetes and a sedentary lifestyle. Can I consume beverages?",
         "I am a 58 year old female with hypertension. I take diuretics and have low activity levels. Is it safe for me to eat salted potato chips?",
         "I am a 50 year old male with kidney disease stage 4 and I am on medication. Can I eat blueberries?",
-        "I am 73 year old male, with height 81kg and height 158cm. i have kidney disease stage 3. i am a lightly active person. Can i eat pork?",
+        "I am 73 year old male, with weight 81kg and height 158cm. i have kidney disease stage 3. i am a lightly active person. Can i eat pork?",
         "I am a 35 year old female with hypertension and I follow a moderately active lifestyle. Is it safe to eat spinach?",
         "I am a 40 year old male with diabetes. I am physically active and maintain a normal BMI. Can I eat pineapple?",
         "I am a 45 year old male with diabetes. I am moderately active. Can I eat whole pasta?",

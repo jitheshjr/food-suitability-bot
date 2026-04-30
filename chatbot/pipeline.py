@@ -11,12 +11,7 @@ from chatbot.llm_response    import generate_response
 from rag.retriever           import retrieve_context
 from ml_model.predict        import predict_suitability
 
-
-# ──────────────────────────────────────────────────────────────────────────────
 # CONDITION-SPECIFIC NOT-FOUND ADVICE
-# When a food is not in the database, skip the ML model entirely and return
-# a condition-appropriate dietary guidance message instead.
-# ──────────────────────────────────────────────────────────────────────────────
 
 _NOT_FOUND_ADVICE = {
     'kidney_disease': (
@@ -112,9 +107,7 @@ def run_conversation_turn(session_id: str, user_text: str, verbose: bool = False
             'action':        action,
         }
 
-    # ── Step 3: All required fields collected — build full patient dict ──
-    # session.to_patient_dict() returns ALL fields (required + optional).
-    # predict.py handles None values gracefully for optional fields.
+    # ── Step 3: All required fields collected
     patient = session.to_patient_dict()
 
     # Entities dict for fusion.py (includes food + all patient fields)
@@ -145,10 +138,6 @@ def run_conversation_turn(session_id: str, user_text: str, verbose: bool = False
                   f"found={food_nutrition.get('found')}")
 
         # ── Not-found early exit ───────────────────────────────────
-        # If the food is not in the database, the ML model would run on
-        # DEFAULT_NUTRITION values (generic placeholder) — producing an
-        # unreliable verdict. Instead, skip the model entirely and return
-        # a condition-specific dietary guidance message.
         if not food_nutrition.get('found', True):
             if verbose:
                 print(f"[!] Food not found in DB — returning not-found response")
@@ -274,9 +263,7 @@ def run_conversation_turn(session_id: str, user_text: str, verbose: bool = False
         }
 
 
-# ──────────────────────────────────────────────────────────────────────────────
 # CLI TEST
-# ──────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     session_id = "test_session_001"
