@@ -1,20 +1,27 @@
 
 # Virtual environment
 env/
+.venv/
+venv/
 
 # Environment variables
 .env
+.env.local
 
 # Python cache
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+
+# Test / tooling cache
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
 
 # Jupyter
 .ipynb_checkpoints/
-
-# Saved models
-ml_model/model/*.pkl
 
 # Vector store (regenerate from documents)
 rag/vectorstore/
@@ -25,5 +32,8 @@ data/raw/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Streamlit
+.streamlit/
 
 .codex

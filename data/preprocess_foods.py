@@ -1,11 +1,66 @@
-import pandas as pd
+import re 
+import json 
+import pandas as pd 
+import numpy as np
+import os
 
-print("----Loading USDA data----")
-food = pd.read_csv("raw/food.csv")
+from groq import Groq
+from dotenv import load_dotenv
+load_dotenv()
+
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-8b-instant")
+_client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+food          = pd.read_csv("raw/food.csv")
 food_nutrient = pd.read_csv("raw/food_nutrient.csv")
-nutrient = pd.read_csv("raw/nutrient.csv")
+nutrient      = pd.read_csv("raw/nutrient.csv")
 
-# Nutrient IDs we care about (from USDA SR Legacy)
+# LLM Function
+
+cache = {}
+
+def extract_food_name_llm(description:str) -> str | None:
+    if description in cache:
+        return cache[description]
+    
+    try:
+        prompt = f"""
+                    Extract a clean, specific food name from this description.
+                    Rules:
+                    - For restaurant items, skip the restaurant/cuisine type prefix (e.g. "restaurant, mexican,")
+                    - Remove cooking/preparation words (frozen, microwaved, dry, etc.)
+                    - Remove storage terms
+                    - Keep the main food identity
+                    - Reorder words naturally if needed
+                    - Keep brand only if essential
+                    Return JSON:
+                    {{"food_name": "..."}}
+                    Text: {description}
+                """
+        
+        response = _client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=100,
+            temperature=0.0
+        )
+
+        raw = response.choices[0].message.content.strip()
+        raw = re.sub(r'```json|```', '', raw).strip()
+
+        parsed = json.loads(raw)
+        name = parsed.get("food_name")
+
+        cache[description] = name
+        return name
+
+    except Exception as e:
+        print(f"Error processing description: {description} - {e}")
+        return None
+    
+
+# Nutrient Mapping
+
 NUTRIENT_MAP = {
     1008: 'calories',
     1003: 'protein_g',
@@ -14,17 +69,17 @@ NUTRIENT_MAP = {
     2000: 'sugar_g',
     1079: 'fiber_g',
     1093: 'sodium_mg',
+    1092: 'potassium_mg',    
+    1091: 'phosphorus_mg',   
 }
 
-print("----Filtering nutrients----")
-# Copying Selected Nutrients from food_nutrient
-filtered = food_nutrient[food_nutrient['nutrient_id'].isin(NUTRIENT_MAP.keys())].copy() 
+# Filtering Nutrients
 
-# Mapping NUTRIENT_MAP to filtered 
+filtered = food_nutrient[food_nutrient['nutrient_id'].isin(NUTRIENT_MAP.keys())].copy()
 filtered['nutrient_name'] = filtered['nutrient_id'].map(NUTRIENT_MAP)
 
-# Pivot so each food is one row with nutrient columns
-print("Pivoting table...")
+# Pivoting to wide format
+
 pivoted = filtered.pivot_table(
     index='fdc_id',
     columns='nutrient_name',
@@ -32,28 +87,64 @@ pivoted = filtered.pivot_table(
     aggfunc='first'
 ).reset_index()
 
-# Merge with food names
-merged = pivoted.merge(food[['fdc_id', 'description']], on='fdc_id')
-merged = merged.rename(columns={'description': 'food_name'})
+# Merging with food descriptions
 
-# Drop rows with too many missing values
+merged = pivoted.merge(food[['fdc_id', 'description']], on='fdc_id')
+
+# CLEANING
+
+# Drop rows with too many missing nutrient values
 merged = merged.dropna(thresh=5)
 
-# Fill remaining NaN with 0
-merged = merged.fillna(0)
+merged[['sugar_g', 'fiber_g']] = merged[['sugar_g', 'fiber_g']].fillna(0)
 
-# Clean food names to lowercase
-merged['food_name'] = merged['food_name'].str.lower().str.strip()
+merged['description'] = merged['description'].str.lower().str.strip()
 
-# Keep only relevant columns in clean order
-cols = ['fdc_id', 'food_name', 'calories', 'protein_g', 'fat_g',
-        'carbs_g', 'sugar_g', 'fiber_g', 'sodium_mg']
-# Only keep cols that exist
-cols = [c for c in cols if c in merged.columns]
-merged = merged[cols]
+# Parser
 
-print(f"Final shape: {merged.shape}")
-print(merged.head())
+def parse_food_name(raw_name: str) -> dict:
+    
+    name = raw_name.lower().strip()
+    result = {
+        'canonical_name':    None,
+        'food_category':     'other',
+    }
 
+    parts = [p.strip() for p in name.split(',') if p.strip()]
+    canonical = parts[0] if parts else name
+    
+    result['canonical_name'] = canonical
+    return result
+
+BAD_NAMES = {'restaurant', 'branded', 'other', 'unknown', 'food'}
+
+def get_canonical_name(row):
+    parsed = parse_food_name(row['description'])
+    name = parsed['canonical_name']
+
+    # Trigger LLM if name is missing, too short, OR a known bad placeholder
+    if not name or len(name) < 3 or name.strip().lower() in BAD_NAMES:
+        llm_name = extract_food_name_llm(row['description'])
+        if llm_name:
+            parsed['canonical_name'] = llm_name
+
+    return pd.Series(parsed)
+
+parsed = merged.apply(get_canonical_name, axis=1)
+merged = pd.concat([merged, parsed], axis=1)
+
+merged['food_name'] = merged['canonical_name']
+final_cols = [
+    'fdc_id', 'food_name', 'description', 'calories', 'protein_g', 'fat_g', 'carbs_g',
+    'sugar_g', 'fiber_g', 'sodium_mg', 'potassium_mg', 'phosphorus_mg',
+]
+
+final_cols = [c for c in final_cols if c in merged.columns]
+
+merged = merged[final_cols]
+
+print(f"\nFinal shape: {merged.shape}")
+print("\nSample:") 
+print(merged[['food_name', 'description']].head(10))
 merged.to_csv("processed/foods_clean.csv", index=False)
-print("Saved to processed/foods_clean.csv")
+print("\n✅ Saved → processed/foods_clean.csv")
